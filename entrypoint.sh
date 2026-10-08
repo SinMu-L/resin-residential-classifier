@@ -23,5 +23,13 @@ if [ "${MERGED_IP_AUTO_DOWNLOAD:-false}" = "true" ]; then
     fi
 fi
 
+# ASN 名单（L1 初筛）初始导入：内置精选首发集，幂等 upsert；失败不阻断启动
+if [ "${ASN_SEED_ON_START:-true}" = "true" ]; then
+    echo "[entrypoint] 导入/补齐 ASN 名单..."
+    if ! gosu app python /app/scripts/seed_asn_registry.py; then
+        echo "[entrypoint][warn] ASN 名单导入失败，服务将继续启动（ASN 管理初始为空）"
+    fi
+fi
+
 # 以非 root 用户降权运行服务
 exec gosu app uvicorn app.main:app --host 0.0.0.0 --port 8000
