@@ -22,7 +22,7 @@ class Settings:
 
         # 启用的富化器列表（按顺序构成回退链），逗号分隔
         self.enrichers: list[str] = [
-            e.strip() for e in os.getenv("ENRICHERS", "ipinfo").split(",") if e.strip()
+            e.strip() for e in os.getenv("ENRICHERS", "mergedip,ipinfo").split(",") if e.strip()
         ]
 
         self.enrich_cache_ttl: int = int(os.getenv("ENRICH_CACHE_TTL", "86400"))

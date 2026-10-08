@@ -148,7 +148,7 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | --- | --- | --- |
 | `SOURCE_DB_PATH` | Resin `cache.db` 路径（只读） | `/data/source/cache.db` |
 | `APP_DB_PATH` | 应用 SQLite 路径 | `/data/app/nodes.sqlite` |
-| `ENRICHERS` | 启用的富化器（按顺序回退，逗号分隔），可选 `ipinfo` / `mergedip` | `ipinfo` |
+| `ENRICHERS` | 启用的富化器（按顺序回退，逗号分隔），可选 `ipinfo` / `mergedip` | `mergedip,ipinfo` |
 | `MERGED_IP_DB_PATH` | 离线 ASN 库路径（NetworkCats/Merged-IP-Data 的 `Merged-IP.mmdb`） | `/data/source/Merged-IP.mmdb`（compose 覆盖为 `/data/mmdb/Merged-IP.mmdb`） |
 | `MERGED_IP_AUTO_DOWNLOAD` | 启动时自动下载离线库（entrypoint 执行） | `false` |
 | `MERGED_IP_DOWNLOAD_URL` | 离线库下载地址（可换镜像/代理） | GitHub Release latest |
