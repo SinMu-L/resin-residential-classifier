@@ -193,16 +193,16 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | `REFRESH_TOKEN` | `POST /refresh` 鉴权（可选，留空=不鉴权） | 空 |
 | `RECENT_TTL` / `RECENT_MAXLEN` | `avoid_recent` 环形缓冲参数 | `60` / `1000` |
 | `POOL_ENABLED` | 启用节点池定时调度 | `true` |
-| `POOL_INTERVAL` | 池复检周期（秒），0=关闭定时 | `86400` |
+| `POOL_INTERVAL` | 池漏斗调度周期（秒），0=关闭定时（每次 ingest 亦会触发） | `1800` |
 | `POOL_L1_STRICT` | L1：未知 ASN 是否直接拒绝（`is_hosting` 命中总是拒绝） | `true` |
 | `ABUSEIPDB_API_KEY` | 【必填】AbuseIPDB API Key（L2 风险查询；缺失则全部停在 probing） | 空 |
 | `ABUSEIPDB_BASE_URL` | AbuseIPDB API 基址 | `https://api.abuseipdb.com/api/v2` |
 | `ABUSEIPDB_TIMEOUT` / `ABUSEIPDB_CONCURRENCY` | 风险查询单次超时（秒）/ 并发数 | `8` / `8` |
 | `POOL_ABUSE_MAX_SCORE` | L2 放行阈值（`abuseConfidenceScore <` 该值） | `30` |
-| `ABUSE_CACHE_TTL` | 风险查询缓存 TTL（秒） | `86400` |
+| `ABUSE_CACHE_TTL` | 风险查询缓存 TTL（秒），与 `POOL_RECHECK_IN_POOL` 取大值决定 L2 调用量 | `21600` |
 | `ABUSE_MAX_AGE_DAYS` | 统计举报覆盖天数 | `90` |
 | `POOL_EVICT_FAILURES` | 连续失败多少次淘汰 | `2` |
-| `POOL_RECHECK_IN_POOL` / `POOL_RECHECK_PROBATION` | 各状态复检间隔（秒） | `604800` / `86400` |
+| `POOL_RECHECK_IN_POOL` / `POOL_RECHECK_PROBATION` | 各状态复检间隔（秒） | `21600` / `3600` |
 | `POOL_COOLDOWN` | 淘汰后冷却期（秒） | `604800` |
 | `RESIN_FEED_ENABLED` | 启用 `GET /resin/subscription` 订阅端点（供 Resin 远程拉取） | `false` |
 | `RESIN_FEED_TOKEN` | 订阅端点 token（公网必填；留空=不鉴权） | 空 |
@@ -272,6 +272,18 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 - **L4 动态更新**：状态机 `probing → in_pool ⇄ probation → evicted`，带滞回（连续 `POOL_EVICT_FAILURES`
   次超标才淘汰）与冷却期 `POOL_COOLDOWN`；定时（`POOL_INTERVAL`）在整轮漏斗中按各状态 `next_check_at` 复检。
 - **L3 场景实测（暂未实现，已预留）**：`pool_score` 与状态位可承载后续 Netflix/ChatGPT/YouTube 解锁检测。
+
+**L2 配额与复检间隔评估**：有效复检间隔 `R = max(POOL_RECHECK_IN_POOL, ABUSE_CACHE_TTL)`（两者需同时到期才会重新送检），
+**L2 日调用量 ≈ `N × 86400 / R`**（`N` = 通过 L1、需要风险查询的唯一 IP 数；`is_hosting`/cloud 被拒的 IP 不计入）。给定日配额 `Q`，最短间隔 `R_min = N × 86400 / Q`：
+
+| N（L2 候选 IP） | R_min（Q=5000/天） | 推荐 `R`（留余量） |
+| --- | --- | --- |
+| 50 | ~15 分钟 | 1 小时 |
+| 200 | ~1 小时 | 6 小时 |
+| 500 | ~2.4 小时 | 6 小时 |
+| 1250 | ~6 小时 | 6 小时 |
+
+默认 `POOL_RECHECK_IN_POOL=ABUSE_CACHE_TTL=21600`（6h），在 5000/天配额下可支撑约 **1250 个 L2 候选 IP**；`POOL_INTERVAL` 仅决定漏斗调度频率（每次 ingest 也会触发），不影响调用量。
 
 名单初始化（精选首发集：约 70 条云 ASN + 约 110 条住宅 ISP ASN，**幂等 upsert**）：
 

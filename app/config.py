@@ -76,8 +76,9 @@ class Settings:
 
         # -- 高质量节点池（L1 ASN 初筛 / L2 AbuseIPDB / L4 复检淘汰） -------- #
         self.pool_enabled: bool = _get_bool(os.getenv("POOL_ENABLED", "true"), True)
-        # 池复检周期（秒），0=关闭定时调度（仍可手动 /pool/rebuild）
-        self.pool_interval: int = int(os.getenv("POOL_INTERVAL", "86400"))
+        # 池漏斗调度周期（秒），0=关闭定时调度（仍可手动 /pool/rebuild）。
+        # 注意：每次 ingest 结束也会触发一次池刷新，故实际频率 ≥ INGEST_INTERVAL。
+        self.pool_interval: int = int(os.getenv("POOL_INTERVAL", "1800"))
         # L1：未知 ASN 是否直接拒绝（严格白名单模式）
         self.pool_l1_strict: bool = _get_bool(os.getenv("POOL_L1_STRICT", "true"), True)
 
@@ -87,15 +88,18 @@ class Settings:
         ).rstrip("/")
         # L2 放行阈值：abuseConfidenceScore < 该值即通过
         self.pool_abuse_max_score: int = int(os.getenv("POOL_ABUSE_MAX_SCORE", "30"))
-        self.abuse_cache_ttl: int = int(os.getenv("ABUSE_CACHE_TTL", "86400"))
+        # L2 风险查询缓存 TTL（秒）。有效复检间隔 = max(本值, POOL_RECHECK_IN_POOL)，
+        # 二者需同时到期才会重新送检 AbuseIPDB；日调用量 ≈ N × 86400 / 有效间隔。
+        self.abuse_cache_ttl: int = int(os.getenv("ABUSE_CACHE_TTL", "21600"))
         self.abuse_max_age_days: int = int(os.getenv("ABUSE_MAX_AGE_DAYS", "90"))
         self.abuseipdb_timeout: int = int(os.getenv("ABUSEIPDB_TIMEOUT", "8"))
         self.abuseipdb_concurrency: int = int(os.getenv("ABUSEIPDB_CONCURRENCY", "8"))
 
         # L4 淘汰与复检间隔
         self.pool_evict_failures: int = int(os.getenv("POOL_EVICT_FAILURES", "2"))
-        self.pool_recheck_in_pool: int = int(os.getenv("POOL_RECHECK_IN_POOL", "604800"))
-        self.pool_recheck_probation: int = int(os.getenv("POOL_RECHECK_PROBATION", "86400"))
+        # in_pool 复检间隔（秒）：6h。与 ABUSE_CACHE_TTL 共同决定 L2 调用量
+        self.pool_recheck_in_pool: int = int(os.getenv("POOL_RECHECK_IN_POOL", "21600"))
+        self.pool_recheck_probation: int = int(os.getenv("POOL_RECHECK_PROBATION", "3600"))
         self.pool_cooldown: int = int(os.getenv("POOL_COOLDOWN", "604800"))
 
         # -- Resin 订阅发布（只读：Resin 主动拉取，本服务不写 Resin） -------- #
