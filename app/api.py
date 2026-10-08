@@ -24,7 +24,7 @@ from .recent_buffer import recent_buffer
 
 router = APIRouter()
 
-RES_MAP = {"residential": 1, "datacenter": 0, "residential_proxy": 2}
+RES_MAP = {"residential": 1, "datacenter": 0, "residential_proxy": 2, "business": 3}
 SORT_WHITELIST = {
     "as_type", "last_enriched_at", "country_code", "is_residential",
     "protocol", "created_at", "updated_at", "ip", "port", "id",
@@ -250,34 +250,41 @@ def get_enrichment(ip: str):
 
 @router.get("/stats")
 def stats():
-    rows = db.get_app_conn().execute(
-        """
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN protocol='http' THEN 1 ELSE 0 END) AS http,
-            SUM(CASE WHEN protocol='https' THEN 1 ELSE 0 END) AS https,
-            SUM(CASE WHEN is_residential=1 THEN 1 ELSE 0 END) AS residential,
-            SUM(CASE WHEN is_residential=0 THEN 1 ELSE 0 END) AS datacenter,
-            SUM(CASE WHEN is_residential=2 THEN 1 ELSE 0 END) AS residential_proxy,
-            SUM(CASE WHEN is_residential IS NULL THEN 1 ELSE 0 END) AS unknown_res,
-            SUM(CASE WHEN enriched=1 THEN 1 ELSE 0 END) AS enriched,
-            SUM(CASE WHEN enriched=0 THEN 1 ELSE 0 END) AS not_enriched,
-            SUM(CASE WHEN as_type='hosting' THEN 1 ELSE 0 END) AS as_hosting,
-            SUM(CASE WHEN as_type='isp' THEN 1 ELSE 0 END) AS as_isp,
-            SUM(CASE WHEN as_type='business' THEN 1 ELSE 0 END) AS as_business,
-            SUM(CASE WHEN as_type IS NULL OR as_type NOT IN ('hosting','isp','business') THEN 1 ELSE 0 END) AS as_other
-        FROM nodes
-        """
-    ).fetchone()
+    conn = db.get_app_conn()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN is_residential=1 THEN 1 ELSE 0 END) AS residential,
+                SUM(CASE WHEN is_residential=0 THEN 1 ELSE 0 END) AS datacenter,
+                SUM(CASE WHEN is_residential=2 THEN 1 ELSE 0 END) AS residential_proxy,
+                SUM(CASE WHEN is_residential=3 THEN 1 ELSE 0 END) AS business,
+                SUM(CASE WHEN is_residential IS NULL THEN 1 ELSE 0 END) AS unknown_res,
+                SUM(CASE WHEN enriched=1 THEN 1 ELSE 0 END) AS enriched,
+                SUM(CASE WHEN enriched=0 THEN 1 ELSE 0 END) AS not_enriched,
+                SUM(CASE WHEN as_type='hosting' THEN 1 ELSE 0 END) AS as_hosting,
+                SUM(CASE WHEN as_type='isp' THEN 1 ELSE 0 END) AS as_isp,
+                SUM(CASE WHEN as_type='business' THEN 1 ELSE 0 END) AS as_business,
+                SUM(CASE WHEN as_type IS NULL OR as_type NOT IN ('hosting','isp','business') THEN 1 ELSE 0 END) AS as_other
+            FROM nodes
+            """
+        ).fetchone()
+        proto_rows = conn.execute(
+            "SELECT protocol AS p, COUNT(*) AS c FROM nodes GROUP BY protocol ORDER BY c DESC"
+        ).fetchall()
+    finally:
+        conn.close()
 
     last = db.get_last_ingest_run()
     return {
         "nodes_total": rows["total"],
-        "by_protocol": {"http": rows["http"] or 0, "https": rows["https"] or 0},
+        "by_protocol": {r["p"]: r["c"] for r in proto_rows},
         "by_residential": {
             "residential": rows["residential"] or 0,
             "datacenter": rows["datacenter"] or 0,
             "residential_proxy": rows["residential_proxy"] or 0,
+            "business": rows["business"] or 0,
             "unknown": rows["unknown_res"] or 0,
         },
         "enriched": rows["enriched"] or 0,

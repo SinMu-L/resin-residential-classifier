@@ -10,6 +10,7 @@
   --amber: #f59e0b;
   --red: #ef4444;
   --violet: #8b5cf6;
+  --cyan: #06b6d4;
 }
 
 * { box-sizing: border-box; }
@@ -177,6 +178,7 @@ td.empty { text-align: center; color: var(--muted); padding: 30px; }
 .tag.residential { color: var(--green); border-color: var(--green); }
 .tag.datacenter { color: var(--amber); border-color: var(--amber); }
 .tag.residential_proxy { color: var(--violet); border-color: var(--violet); }
+.tag.business { color: var(--cyan); border-color: var(--cyan); }
 .tag.unknown { color: var(--muted); }
 .tag.http { color: var(--primary); border-color: var(--primary); }
 .tag.https { color: var(--green); border-color: var(--green); }

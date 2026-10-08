@@ -1,6 +1,6 @@
 # 代理节点住宅/机房识别服务
 
-基于 [Resinat/Resin](https://github.com/Resinat/Resin) 单独拆出的 **只读旁路分析组件**。它从 Resin 运行目录的 `cache.db` 中**只读抽取 http/https 代理节点**，通过可插拔富化链做 IP 情报富化（默认 `mergedip,ipinfo`：离线 [Merged-IP.mmdb](https://github.com/NetworkCats/Merged-IP-Data) 优先，未命中回退在线 [ipinfo.io](https://ipinfo.io)，**全量字段落库**），并派生住宅（residential）/ 机房（datacenter）等属性，最终通过 REST API 按 `ip:port` 对外提供查询。
+基于 [Resinat/Resin](https://github.com/Resinat/Resin) 单独拆出的 **只读旁路分析组件**。它从 Resin 运行目录的 `cache.db` 中**只读抽取全部类型（`server` 为字面 IP 且健康、低延迟）的代理节点**，通过可插拔富化链做 IP 情报富化（默认 `mergedip,ipinfo`：离线 [Merged-IP.mmdb](https://github.com/NetworkCats/Merged-IP-Data) 优先，未命中回退在线 [ipinfo.io](https://ipinfo.io)，**全量字段落库**），并派生住宅（residential）/ 机房（datacenter）等属性，最终通过 REST API 按 `ip:port` 对外提供查询。
 
 > 定位：零侵入、只读、可独立部署。不修改、不回写 Resin 的任何数据（AC-1）。
 
@@ -161,6 +161,9 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | --- | --- | --- |
 | `SOURCE_DB_PATH` | Resin `cache.db` 路径（只读） | `/data/source/cache.db` |
 | `APP_DB_PATH` | 应用 SQLite 路径 | `/data/app/nodes.sqlite` |
+| `SOURCE_INCLUDE_TYPES` | 抽取的节点类型：`all`/`*`/空=全部；或逗号分隔白名单（如 `http,vless,trojan`） | `all` |
+| `SOURCE_REQUIRE_HEALTHY` | 入库前要求 Resin 原生健康（未熔断 + 有出口 IP + 有延迟样本） | `true` |
+| `SOURCE_MAX_LATENCY_MS` | 入库延迟上限（毫秒），`<=0` 关闭延迟门槛 | `300` |
 | `ENRICHERS` | 启用的富化器（按顺序回退，逗号分隔），可选 `ipinfo` / `mergedip` | `mergedip,ipinfo` |
 | `MERGED_IP_DB_PATH` | 离线 ASN 库路径（NetworkCats/Merged-IP-Data 的 `Merged-IP.mmdb`） | `/data/source/Merged-IP.mmdb`（compose 覆盖为 `/data/mmdb/Merged-IP.mmdb`） |
 | `MERGED_IP_AUTO_DOWNLOAD` | 启动时自动下载离线库（entrypoint 执行） | `false` |
@@ -179,7 +182,7 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | `RECENT_TTL` / `RECENT_MAXLEN` | `avoid_recent` 环形缓冲参数 | `60` / `1000` |
 | `POOL_ENABLED` | 启用节点池定时调度 | `true` |
 | `POOL_INTERVAL` | 池复检周期（秒），0=关闭定时 | `86400` |
-| `POOL_L1_STRICT` | L1 未知 ASN 是否直接拒绝 | `true` |
+| `POOL_L1_STRICT` | L1：未知 ASN 是否直接拒绝（`is_hosting` 命中总是拒绝） | `true` |
 | `ABUSEIPDB_API_KEY` | AbuseIPDB API Key（L2） | 空 |
 | `ABUSEIPDB_BASE_URL` | AbuseIPDB API 基址 | `https://api.abuseipdb.com/api/v2` |
 | `ABUSEIPDB_TIMEOUT` / `ABUSEIPDB_CONCURRENCY` | 风险查询单次超时（秒）/ 并发数 | `8` / `8` |
@@ -235,13 +238,12 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 ## 6. 核心设计要点
 
 - **只读安全**：数据源以 `file:<path>?mode=ro` 打开，容器层 `ro` 挂载，任何写操作只发生在独立的应用库（AC-1）。
-- **精确过滤**：仅保留 `type == "http"`；`tls.enabled == true` 记为 `https`，否则 `http`（实测 75 http + 298 https，合计 373）。
-  仅接受 `server` 为合法 IP 的节点，域名字面量节点会被跳过（无法做 IP 富化/池判定）。
+- **精确过滤**：默认抽取全部节点类型（`SOURCE_INCLUDE_TYPES=all`），仅接受 `server` 为合法 IP 的节点（域名字面量节点会被跳过，无法做 IP 富化/池判定）；并在**入库前**按 Resin 原生健康口径（未熔断 + 有出口 IP + 有延迟样本）+ 延迟门槛（`SOURCE_MAX_LATENCY_MS`，默认 300ms）筛掉劣质/未就绪节点。`http` 家族协议由 `tls.enabled` 归一化为 `http`/`https`，其余类型（vless/vmess/trojan/shadowsocks/hysteria2/…）的 `protocol` 即为原始类型。
 - **运行时指标**：只读抽取 Resin 的 `node_latency`（各探测域名 EWMA 延迟，取最小值作为 `latency_ms`）与 `nodes_dynamic`
   （`failure_count` / `circuit_open_since` / `egress_ip` / `egress_region`），落库并在 API/看板暴露；支持按延迟过滤与排序。
   节点池的运行时指标按 **IP** 关联当前节点，能抵御 Resin 节点 hash 变化；同步结束会清理已从数据源移除的节点并自动刷新池。
 - **全量落库**：ipinfo 返回的全部字段原样存入 `ip_enrichments.raw`，关键字段拆分为独立列便于查询/索引。
-- **可事后重算**：住宅/机房标签由 `raw` 派生（`is_hosting` / `as.type` / `anonymous.is_res_proxy` / `is_anonymous`），规则变更无需重新调用 API。
+- **可事后重算**：住宅属性由 `raw` 派生（`is_hosting` / `as.type` / `anonymous.is_res_proxy` / `is_anonymous`），取值为 `0` 机房 / `1` 住宅 / `2` 住宅代理 / `3` 企业专线（`as.type=business`）/ `NULL` 未知，规则变更无需重新调用 API。
 - **可插拔富化器**：统一 `BaseIpEnricher` 接口 + 注册表回退链；内置 `IpinfoEnricher`（在线 `/batch` 批量与 `429` 回退）与 `MergedIpEnricher`（离线 Merged-IP.mmdb，ASN/地理/代理标记，无需 Token）。
 - **幂等与缓存**：节点按 `hash` Upsert；IP 维度缓存富化结果（TTL）避免重复调用与限流。
 
@@ -249,8 +251,10 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 
 在富化基础上按 **IP 去重**构建一个自动维护的高质量节点池，规则为一个“漏斗”：
 
-- **L1 ASN 初筛**：名单存于 `asn_registry` 表（`cloud` 云/机房黑名单 + `residential` 住宅 ISP 白名单），
-  可在网页「ASN 管理」增删改。命中 cloud 直接拒；命中 residential 进 L2；未知 ASN 由 `POOL_L1_STRICT` 决定。
+- **L1 机房/ASN 初筛**：先按富化结果判定机房——`is_hosting` 为真直接拒（`evict_reason=hosting`，充分利用本地库标记）；
+  再查 `asn_registry` 表（`cloud` 云/机房黑名单 + `residential` 住宅 ISP 白名单），
+  可在网页「ASN 管理」增删改。命中 cloud 拒；命中 residential 进 L2；未知 ASN 由 `POOL_L1_STRICT` 决定。
+  被 L1 拒绝的 IP 也会以 `evicted` 状态落库（`evict_reason=hosting|cloud_asn|unknown_asn`），保证所有被评估的 IP 都可在 `/pool` 中查看过滤结果。
 - **L2 动态风险**：对存活 IP 调 AbuseIPDB（`abuseConfidenceScore`），`< POOL_ABUSE_MAX_SCORE` 才准入；
   结果按 IP 缓存于 `ip_risk`，仅对“新 IP / 到期复检 IP”发起请求以控制配额。
 - **L4 动态更新**：状态机 `probing → in_pool ⇄ probation → evicted`，带滞回（连续 `POOL_EVICT_FAILURES`
@@ -311,7 +315,7 @@ RESIN_FEED_STATES=in_pool
 再调 Resin 的 `POST /api/v1/platforms/preview-filter`（或 `GET /api/v1/nodes`）核对命中节点数，
 确认无重复节点后再让订阅生效。
 
-**安全须知**：节点 `raw_options` 可能包含代理账号密码，订阅内容属敏感数据。
+**安全须知**：节点 `raw_options` 可能包含代理凭据（http 的 `username/password`、vmess/vless 的 `uuid`、trojan/shadowsocks/hysteria2 的 `password` 等），订阅内容属敏感数据。
 - 公网暴露**必须**设置 `RESIN_FEED_TOKEN`（否则启动会告警且无鉴权）；
 - 建议用 HTTPS；仅暴露 `/resin/subscription` 这一条路径，其余 API/UI 加访问控制；
 - 端点已设置 `Cache-Control: no-store`，且内容不写日志。`GET /resin/status` 的
@@ -346,7 +350,7 @@ class MaxMindEnricher(BaseIpEnricher):
 PYTHONPATH=. python tests/smoke_test.py
 ```
 
-该测试会生成示例数据源、用 Mock 富化器替换真实 ipinfo（避免网络/Token 依赖），并验证：只读抽取与 http/https 过滤、按 IP 富化与派生标签、`/node` `/nodes` `/nodes/random` `/enrichment` `/stats` 端点、404 边界、`/refresh` 鉴权与 202 触发。
+该测试会生成示例数据源、用 Mock 富化器替换真实 ipinfo（避免网络/Token 依赖），并验证：只读抽取与全类型（健康 + 延迟）过滤、按 IP 富化与派生标签、`/node` `/nodes` `/nodes/random` `/enrichment` `/stats` 端点、404 边界、`/refresh` 鉴权与 202 触发。
 
 ---
 
@@ -405,7 +409,7 @@ docker compose up -d --build            # 代码变了
 | 验收项 | 状态 |
 | --- | --- |
 | AC-1 只读接入，不修改源文件 | ✅ `mode=ro` + 容器 `ro` 挂载 |
-| AC-2 仅 373 个 http/https 节点纳入 | ✅ 按 `type==http` 过滤 + `tls` 归一化 |
+| AC-2 全类型健康节点纳入（`server` 为 IP + 健康 + 延迟 < 300ms） | ✅ `SOURCE_INCLUDE_TYPES=all` + Resin 健康口径 + 延迟门槛 |
 | AC-3 `/node/{ip}/{port}` 返回富化与 `is_residential` | ✅ |
 | AC-4 ipinfo 字段全量落库，可事后重算 | ✅ `ip_enrichments.raw` |
 | AC-5 新增富化源仅实现接口并注册 | ✅ 注册表机制 |

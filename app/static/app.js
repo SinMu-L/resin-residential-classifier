@@ -4,12 +4,14 @@ const RES_LABEL = {
   0: "机房",
   1: "住宅",
   2: "住宅代理",
+  3: "企业专线",
   null: "未知",
 };
 const RES_CLASS = {
   0: "datacenter",
   1: "residential",
   2: "residential_proxy",
+  3: "business",
   null: "unknown",
 };
 
@@ -98,13 +100,16 @@ function renderCards(s) {
   const r = s.by_residential || {};
   const a = s.by_as_type || {};
   const p = s.by_protocol || {};
+  const protoCards = Object.entries(p)
+    .sort((x, y) => y[1] - x[1])
+    .map(([k, v]) => card(k, v, ""));
   $("stats-cards").innerHTML = [
     card("节点总数", s.nodes_total, "blue"),
-    card("http", p.http || 0, ""),
-    card("https", p.https || 0, ""),
+    ...protoCards,
     card("住宅", r.residential || 0, "green"),
     card("机房", r.datacenter || 0, "amber"),
     card("住宅代理", r.residential_proxy || 0, "violet"),
+    card("企业专线", r.business || 0, ""),
     card("未知", r.unknown || 0, ""),
     card("已富化", s.enriched || 0, "green", `未富化 ${s.not_enriched || 0}`),
     card("AS hosting", a.hosting || 0, ""),
@@ -116,10 +121,22 @@ function renderCards(s) {
     "最近同步: " + fmtTime(s.last_sync_at) + (s.last_sync_status ? ` (${s.last_sync_status})` : "");
 }
 
+function populateProtocolFilter(byProtocol) {
+  const sel = $("f-protocol");
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = Object.keys(byProtocol || {}).sort();
+  sel.innerHTML =
+    '<option value="">全部</option>' +
+    opts.map((k) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`).join("");
+  sel.value = cur;
+}
+
 async function loadStats() {
   try {
     const s = await api("/stats");
     renderCards(s);
+    populateProtocolFilter(s.by_protocol);
   } catch (e) {
     toast("加载统计失败: " + e.message, "err");
   }

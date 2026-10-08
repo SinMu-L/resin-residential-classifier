@@ -86,6 +86,7 @@ def derive_residential(f: dict) -> Optional[int]:
 
     - is_hosting==true 或 as.type=="hosting"            -> 0 机房
     - anonymous.is_res_proxy==true                       -> 2 住宅代理
+    - as.type=="business"                                -> 3 企业专线
     - as.type=="isp" 且 is_anonymous==false              -> 1 住宅
     - 其它 / 字段缺失                                    -> None 未知
     """
@@ -93,6 +94,8 @@ def derive_residential(f: dict) -> Optional[int]:
         return 0
     if f.get("is_res_proxy") is True:
         return 2
+    if f.get("as_type") == "business":
+        return 3
     if f.get("as_type") == "isp" and f.get("is_anonymous") is False:
         return 1
     return None

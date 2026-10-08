@@ -62,6 +62,14 @@ class FakeEnricher(BaseIpEnricher):
                 "anonymous": {"is_res_proxy": True},
                 "geo": {"city": "Chicago", "region": "IL", "country_code": "US"},
             }
+        if ip.startswith("103.224"):
+            # 企业专线：business 且非 hosting/非住宅代理 -> is_residential=3
+            return {
+                "as": {"asn": "AS33333", "name": "Enterprise Line Ltd", "type": "business"},
+                "is_hosting": False,
+                "is_anonymous": True,
+                "geo": {"city": "Frankfurt", "region": "HE", "country_code": "DE"},
+            }
         # 未知：仅 country
         return {"country": "JP"}
 
@@ -99,7 +107,7 @@ class FailingRisk(BaseRiskChecker):
         }
 
 
-def wait_pool_idle(timeout_ticks=100):
+def wait_pool_idle(timeout_ticks=600):
     for _ in range(timeout_ticks):
         if not pool._run_lock.locked():
             return True
@@ -118,7 +126,7 @@ def main():
     from app.main import app
     with TestClient(app) as client:
         # 等待首次同步完成
-        for _ in range(50):
+        for _ in range(300):
             r = client.get("/health").json()
             if r.get("last_sync_status") == "ok":
                 break
@@ -136,14 +144,26 @@ def main():
 
         stats = client.get("/stats").json()
         total = stats["nodes_total"]
-        http_cnt = stats["by_protocol"]["http"] + stats["by_protocol"]["https"]
-        assert total == http_cnt, stats
+        assert total == sum(stats["by_protocol"].values()), stats
         assert stats["enriched"] == total, stats  # Mock 全部成功
-        print(f"[OK] /stats: 总节点={total}, http={stats['by_protocol']['http']}, "
-              f"https={stats['by_protocol']['https']}, "
+        print(f"[OK] /stats: 总节点={total}, by_protocol={stats['by_protocol']}, "
               f"机房={stats['by_residential']['datacenter']}, "
               f"住宅={stats['by_residential']['residential']}, "
               f"住宅代理={stats['by_residential']['residential_proxy']}")
+
+        # 全类型纳入：至少存在一种非 http/https 协议，且可按其过滤
+        non_http = [k for k in stats["by_protocol"] if k not in ("http", "https")]
+        assert non_http, stats["by_protocol"]
+        rv = client.get("/nodes", params={"protocol": non_http[0], "limit": 5}).json()
+        assert rv["total"] > 0, rv
+        print(f"[OK] 全类型入库: protocols={list(stats['by_protocol'])}, "
+              f"例 {non_http[0]} total={rv['total']}")
+
+        # 企业专线(3)：business 且非 hosting/非住宅代理
+        assert stats["by_residential"]["business"] > 0, stats["by_residential"]
+        rb = client.get("/nodes", params={"residential": "business", "limit": 5}).json()
+        assert rb["total"] > 0 and all(i["is_residential"] == 3 for i in rb["items"]), rb
+        print(f"[OK] 企业专线(3): total={rb['total']} 例={rb['items'][0]['ip']}")
 
         # 列表 + 过滤
         r = client.get("/nodes", params={"protocol": "https", "limit": 5}).json()
@@ -160,7 +180,7 @@ def main():
         sample = r["items"][0]
         node = client.get(f"/node/{sample['ip']}/{sample['port']}").json()
         assert node["enriched"] is True
-        assert node["is_residential"] in (0, 1, 2, None), node
+        assert node["is_residential"] in (0, 1, 2, 3, None), node
         raw = node["enrichment"]["raw"]
         if raw.get("as"):
             assert raw["as"]["type"] in ("hosting", "isp", "business"), node
@@ -244,8 +264,17 @@ def main():
         pstats = client.get("/pool/stats").json()
         assert pstats.get("total", 0) > 0, pstats
         assert pstats["by_state"]["in_pool"] > 0, pstats
-        print(f"[OK] /pool/stats total={pstats['total']} states={pstats['by_state']} "
-              f"avg_abuse={pstats['avg_abuse_score']}")
+        # 全部被评估的 IP 都应进池（含 L1 拒绝为 evicted），避免未知/机房记录不可见
+        uniq_ips = {i["ip"] for i in client.get("/nodes", params={"limit": 500}).json()["items"]}
+        assert pstats["total"] == len(uniq_ips), (pstats["total"], len(uniq_ips))
+        assert pstats["by_state"]["evicted"] > 0, pstats
+        print(f"[OK] /pool/stats total={pstats['total']}(==唯一IP {len(uniq_ips)}) "
+              f"states={pstats['by_state']} avg_abuse={pstats['avg_abuse_score']}")
+        ev = client.get("/pool", params={"state": "evicted", "limit": 5}).json()
+        assert ev["total"] > 0 and any(
+            i["evict_reason"] in ("hosting", "cloud_asn", "unknown_asn", "high_abuse") for i in ev["items"]
+        ), ev
+        print(f"[OK] 拒绝 IP 已落池: evicted total={ev['total']} 例 reason={ev['items'][0]['evict_reason']}")
 
         pl = client.get("/pool", params={"state": "in_pool", "limit": 5}).json()
         assert pl["total"] > 0 and pl["items"], pl
@@ -325,7 +354,7 @@ def main():
         sub = feed.json()
         assert isinstance(sub, dict) and isinstance(sub.get("outbounds"), list), sub
         assert len(sub["outbounds"]) == cur["by_state"]["in_pool"], (len(sub["outbounds"]), cur)
-        assert all(o.get("type") == "http" and o.get("tag", "").startswith("pool-")
+        assert all(o.get("type") and o.get("tag", "").startswith("pool-")
                    for o in sub["outbounds"]), sub["outbounds"][:1]
         print(f"[OK] /resin/subscription token 鉴权 + in_pool 订阅 outbounds={len(sub['outbounds'])}")
 

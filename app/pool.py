@@ -105,11 +105,16 @@ def _do_pool_sync(force: bool = False, only_ips: set = None) -> dict:
     def rep(rows):
         return min(rows, key=lambda x: (x["port"], x["id"]))
 
-    # -- L1：ASN 分类，并决定哪些 IP 需要（重新）查询风险 --------------- #
+    # -- L1：机房/ASN 分类，并决定哪些 IP 需要（重新）查询风险 ---------- #
     l1: dict[str, tuple] = {}          # ip -> (verdict, reason, asn)
     need_risk: list[str] = []
     for ip, rows in by_ip.items():
-        asn = asn_store.normalize_asn(rep(rows)["asn"])
+        r = rep(rows)
+        asn = asn_store.normalize_asn(r["asn"])
+        # 机房判定：富化（本地库 is_hosting 等）已标记为托管/机房 -> 直接拒
+        if r["is_hosting"] == 1:
+            l1[ip] = ("reject", "hosting", asn)
+            continue
         cat = asn_store.classify(asn)
         if cat == "cloud":
             l1[ip] = ("reject", "cloud_asn", asn)
@@ -136,7 +141,7 @@ def _do_pool_sync(force: bool = False, only_ips: set = None) -> dict:
     stats = {
         "ips_seen": len(by_ip), "admitted": 0, "kept": 0, "probation": 0,
         "evicted": 0, "rejected_l1": 0, "rejected_cloud": 0, "rejected_unknown": 0,
-        "error": 0, "removed": 0, "queried": len(need_risk),
+        "rejected_hosting": 0, "error": 0, "removed": 0, "queried": len(need_risk),
     }
 
     # -- L1/L2 决策与状态迁移 ------------------------------------------ #
@@ -152,12 +157,17 @@ def _do_pool_sync(force: bool = False, only_ips: set = None) -> dict:
                 stats["rejected_cloud"] += 1
             elif reason == "unknown_asn":
                 stats["rejected_unknown"] += 1
-            if ex is not None and ex["state"] != "evicted":
+            elif reason == "hosting":
+                stats["rejected_hosting"] += 1
+            # 首次出现的拒绝 IP 也要落一条 evicted，保证“全部进池”可见
+            if ex is None or ex["state"] != "evicted":
                 db.upsert_pool_node(_row(
                     ip, r["hash"], len(rows), asn, "evicted",
-                    abuse_score=ex["abuse_score"], failures=ex["consecutive_failures"],
-                    reason=reason, admitted_at=ex["admitted_at"],
-                    last_checked_at=ex["last_checked_at"],
+                    abuse_score=ex["abuse_score"] if ex else None,
+                    failures=ex["consecutive_failures"] if ex else 0,
+                    reason=reason,
+                    admitted_at=ex["admitted_at"] if ex else None,
+                    last_checked_at=ex["last_checked_at"] if ex else now,
                     next_check_at=now + settings.pool_cooldown,
                     evicted_at=now, evict_reason=reason, created=created, updated=now,
                 ))
@@ -246,15 +256,15 @@ def _do_pool_sync(force: bool = False, only_ips: set = None) -> dict:
                 stats["removed"] += 1
 
     logger.info(
-        "池漏斗完成: ips=%s 查询=%s in_pool+=%s 淘汰=%s L1拒=%s(云=%s,未知=%s) 错误=%s 移除=%s 耗时=%ss",
+        "池漏斗完成: ips=%s 查询=%s in_pool+=%s 淘汰=%s L1拒=%s(云=%s,机房=%s,未知=%s) 错误=%s 移除=%s 耗时=%ss",
         stats["ips_seen"], stats["queried"], stats["admitted"], stats["evicted"],
-        stats["rejected_l1"], stats["rejected_cloud"], stats["rejected_unknown"],
-        stats["error"], stats["removed"], int(time.time()) - now,
+        stats["rejected_l1"], stats["rejected_cloud"], stats["rejected_hosting"],
+        stats["rejected_unknown"], stats["error"], stats["removed"], int(time.time()) - now,
     )
     _prog.finish(
         message=f"IP {stats['ips_seen']} · 查询 {stats['queried']} · 入池 {stats['admitted']} · "
                 f"淘汰 {stats['evicted']} · L1拒 {stats['rejected_l1']}"
-                f"（云 {stats['rejected_cloud']}/未知 {stats['rejected_unknown']}）"
+                f"（云 {stats['rejected_cloud']}/机房 {stats['rejected_hosting']}/未知 {stats['rejected_unknown']}）"
     )
     return stats
 

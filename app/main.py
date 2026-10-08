@@ -99,7 +99,7 @@ async def _mmdb_scheduler():
 
 app = FastAPI(
     title="代理节点住宅/机房识别服务",
-    description="基于 Resin 数据源的只读旁路分析组件：抽取 http/https 节点，调用 ipinfo.io 富化并识别住宅/机房属性。",
+    description="基于 Resin 数据源的只读旁路分析组件：抽取 server 为 IP 的全部类型节点（健康且低延迟），富化并识别住宅/机房属性。",
     version=settings.version,
     lifespan=lifespan,
     default_response_class=JSONResponse,

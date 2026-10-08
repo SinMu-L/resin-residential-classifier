@@ -21,8 +21,8 @@ class NodeCandidate:
     hash: str
     ip: str
     port: int
-    protocol: str          # 'http' | 'https'
-    raw_type: str          # 原始 type（此处恒为 'http'）
+    protocol: str          # 'http' | 'https'（http 家族）或原始 type（vless/vmess/trojan/...）
+    raw_type: str          # 原始 type（如 'http' / 'vless' / 'trojan'）
     tag: Optional[str]
     created_at: int        # Unix 秒
     raw_options: dict      # 节点原始连接配置
@@ -137,15 +137,26 @@ def read_source_nodes():
     except Exception as e:  # noqa: BLE001 - 数据源不可达需整体降级
         return [], f"无法读取数据源 {path}: {e}"
 
+    from .config import settings
+    include_types = settings.source_include_types
+    require_healthy = settings.source_require_healthy
+    max_latency = settings.source_max_latency_ms
+
     candidates: list[NodeCandidate] = []
     skipped_non_ip = 0
+    skipped_type = 0
+    skipped_health = 0
+    skipped_slow = 0
     for r in rows:
         raw = _parse_json(r["raw_options_json"])
         if not isinstance(raw, dict):
             continue
         typ = str(raw.get("type") or "").lower()
-        # FR-2.1：仅保留 http 类型（https 由 http + tls.enabled 推导）
-        if typ != "http":
+        if not typ:
+            continue
+        # FR-2.1：按 SOURCE_INCLUDE_TYPES 过滤类型（默认 all 全类型纳入）
+        if include_types is not None and typ not in include_types:
+            skipped_type += 1
             continue
         server = raw.get("server")
         port = raw.get("server_port")
@@ -162,24 +173,44 @@ def read_source_nodes():
             port = int(port)
         except (ValueError, TypeError):
             continue
-        tls = raw.get("tls")
-        tls_enabled = bool(tls.get("enabled", False)) if isinstance(tls, dict) else False
-        protocol = "https" if tls_enabled else "http"
 
         h = str(r["hash"])
         lat = latency.get(h)
         dyn = dynamic.get(h) or {}
+
+        # 健康门槛（对齐 Resin 可路由口径）：未熔断 + 有出口 IP + 有延迟样本
+        if require_healthy:
+            fc = dyn.get("failure_count")
+            if (dyn.get("circuit_open_since")
+                    or fc not in (0, None)
+                    or not dyn.get("egress_ip")
+                    or lat is None):
+                skipped_health += 1
+                continue
+
+        latency_ms = lat["min_ms"] if lat else None
+        if max_latency and (latency_ms is None or latency_ms >= max_latency):
+            skipped_slow += 1
+            continue
+
+        if typ == "http":
+            tls = raw.get("tls")
+            tls_enabled = bool(tls.get("enabled", False)) if isinstance(tls, dict) else False
+            protocol = "https" if tls_enabled else "http"
+        else:
+            protocol = typ
+
         candidates.append(
             NodeCandidate(
                 hash=h,
                 ip=server,
                 port=port,
                 protocol=protocol,
-                raw_type="http",
+                raw_type=typ,
                 tag=raw.get("tag"),
                 created_at=_ns_to_s(r["created_at_ns"]),
                 raw_options=raw,
-                latency_ms=(lat["min_ms"] if lat else None),
+                latency_ms=latency_ms,
                 latencies=(lat["map"] if lat else {}),
                 latency_updated_at=(lat["updated_at"] if lat else None),
                 failure_count=dyn.get("failure_count"),
@@ -189,8 +220,10 @@ def read_source_nodes():
                 egress_updated_at=dyn.get("egress_updated_at"),
             )
         )
-    if skipped_non_ip:
-        logger.info("跳过 %d 个 server 为域名的节点（仅支持 IP 节点）", skipped_non_ip)
+    logger.info(
+        "数据源过滤: 纳入=%d 跳过(类型=%d, 域名=%d, 未就绪=%d, 慢=%d)",
+        len(candidates), skipped_type, skipped_non_ip, skipped_health, skipped_slow,
+    )
     return candidates, None
 
 

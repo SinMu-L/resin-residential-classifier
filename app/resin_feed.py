@@ -76,7 +76,7 @@ def contains_credentials(content: dict) -> bool:
     for ob in content.get("outbounds", []):
         if not isinstance(ob, dict):
             continue
-        if ob.get("username") or ob.get("password"):
+        if ob.get("username") or ob.get("password") or ob.get("uuid"):
             return True
         if ob.get("users"):  # sing-box 多用户形式
             return True

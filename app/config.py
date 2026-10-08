@@ -20,6 +20,20 @@ class Settings:
         self.source_db_path: str = os.getenv("SOURCE_DB_PATH", "/data/source/cache.db")
         self.app_db_path: str = os.getenv("APP_DB_PATH", "/data/app/nodes.sqlite")
 
+        # 数据源节点准入过滤（FR-2.1）：允许抽取的节点类型。
+        # "all" / "*" / 空 = 不限制；否则为逗号分隔的允许列表（如 "http,vless,trojan"）。
+        _types = os.getenv("SOURCE_INCLUDE_TYPES", "all").strip().lower()
+        self.source_include_types = (
+            None if _types in ("", "all", "*")
+            else {t.strip() for t in _types.split(",") if t.strip()}
+        )
+        # 健康准入：未熔断 + 有出口 IP + 有延迟样本（对齐 Resin 可路由口径）。
+        self.source_require_healthy: bool = _get_bool(
+            os.getenv("SOURCE_REQUIRE_HEALTHY", "true"), True
+        )
+        # 延迟上限（毫秒）；<=0 表示不启用延迟门槛。
+        self.source_max_latency_ms: float = float(os.getenv("SOURCE_MAX_LATENCY_MS", "300"))
+
         # 启用的富化器列表（按顺序构成回退链），逗号分隔
         self.enrichers: list[str] = [
             e.strip() for e in os.getenv("ENRICHERS", "mergedip,ipinfo").split(",") if e.strip()
