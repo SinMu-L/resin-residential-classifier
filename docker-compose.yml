@@ -12,11 +12,11 @@ services:
       - ./mmdb-data:/data/mmdb
     env_file: .env
     environment:
-      # 可用环境变量覆盖 .env（可选）
-      SOURCE_DB_PATH: /data/source/cache.db
-      APP_DB_PATH: /data/app/nodes.sqlite
+      # 以 .env 为准；未设置时回退到容器内挂载点默认值
+      SOURCE_DB_PATH: ${SOURCE_DB_PATH:-/data/source/cache.db}
+      APP_DB_PATH: ${APP_DB_PATH:-/data/app/nodes.sqlite}
       # 离线库路径指向可写卷；启用 mergedip 时在 .env 打开 MERGED_IP_AUTO_DOWNLOAD=true
-      MERGED_IP_DB_PATH: /data/mmdb/Merged-IP.mmdb
+      MERGED_IP_DB_PATH: ${MERGED_IP_DB_PATH:-/data/mmdb/Merged-IP.mmdb}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
