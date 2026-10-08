@@ -4,12 +4,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # 宿主机目录 -> 容器挂载点。宿主机目录可用 .env 的 *_HOST_DIR 覆盖。
       # Resin 数据源目录：只读挂载，从文件系统层面杜绝误写（AC-1）
-      - ./resin-data/cache:/data/source:ro
+      - ${RESIN_CACHE_HOST_DIR:-./resin-data/cache}:/data/source:ro
       # 应用 SQLite：读写持久化
-      - ./app-data:/data/app
+      - ${APP_DB_HOST_DIR:-./app-data}:/data/app
       # 离线库 Merged-IP.mmdb：可写持久化（由 entrypoint 下载/更新）
-      - ./mmdb-data:/data/mmdb
+      - ${MMDB_HOST_DIR:-./mmdb-data}:/data/mmdb
     env_file: .env
     environment:
       # 以 .env 为准；未设置时回退到容器内挂载点默认值

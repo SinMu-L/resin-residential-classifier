@@ -97,19 +97,25 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ### 3.2 Docker / Compose（推荐交付方式）
 
 ```bash
-# 准备真实 Resin 数据目录，例如 ./resin-data/cache/cache.db
+# 准备真实 Resin 数据目录，例如 /root/Resin/data/cache/cache.db
 cp .env.example .env          # 按需填入 IPINFO_TOKEN / ABUSEIPDB_API_KEY
-docker compose up -d          # 只读挂载数据源，应用库持久化到 ./app-data
+# 若 Resin 数据不在项目内 ./resin-data/cache，请在 .env 指定宿主机目录：
+#   RESIN_CACHE_HOST_DIR=/root/Resin/data/cache
+docker compose up -d          # 该目录只读挂载到容器 /data/source，应用库持久化到 ./app-data
 ```
+
+> 路径规则：`.env` 里 **`*_HOST_DIR` = 宿主机目录**（用于 compose 挂载，例：`RESIN_CACHE_HOST_DIR=/root/Resin/data/cache`），
+> 而 **`SOURCE_DB_PATH` / `APP_DB_PATH` / `MERGED_IP_DB_PATH` = 容器内路径**（固定为 `/data/source/cache.db`、`/data/app/nodes.sqlite`、`/data/mmdb/Merged-IP.mmdb`）。
+> 二者不可互换；只改 `.env` 无法把宿主机路径直接暴露给容器。
 
 首次启动会**自动完成**（失败仅告警、不阻断启动）：
 - **导入内置 ASN 名单**（约 70 云 + 110 住宅 ISP，幂等 upsert；由 `ASN_SEED_ON_START` 控制，默认开启）；
 - 当 `MERGED_IP_AUTO_DOWNLOAD=true` 时**下载离线库** `Merged-IP.mmdb` 到 `./mmdb-data`（见 3.3）。
 
 `docker-compose.yml` 已配置：
-- `./resin-data/cache` → `/data/source` **只读 (`ro`)** 挂载（文件系统级防误写，AC-1）
-- `./app-data` → `/data/app` 读写持久化
-- `./mmdb-data` → `/data/mmdb` 读写持久化（离线库 `Merged-IP.mmdb`，见 3.3）
+- `${RESIN_CACHE_HOST_DIR:-./resin-data/cache}` → `/data/source` **只读 (`ro`)** 挂载（文件系统级防误写，AC-1）
+- `${APP_DB_HOST_DIR:-./app-data}` → `/data/app` 读写持久化
+- `${MMDB_HOST_DIR:-./mmdb-data}` → `/data/mmdb` 读写持久化（离线库 `Merged-IP.mmdb`，见 3.3）
 - `healthcheck` 调用 `/health`
 - `env_file: .env` 注入全部配置；`environment:` 仅用 `${VAR:-默认}` 兜底三个路径，
   **以 `.env` 为准**（Compose 中 `environment:` 优先级高于 `env_file`，这里用插值避免覆盖）
@@ -159,8 +165,11 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 
 | 配置 | 说明 | 默认 |
 | --- | --- | --- |
-| `SOURCE_DB_PATH` | Resin `cache.db` 路径（只读） | `/data/source/cache.db` |
-| `APP_DB_PATH` | 应用 SQLite 路径 | `/data/app/nodes.sqlite` |
+| `RESIN_CACHE_HOST_DIR` | 宿主机 Resin cache 目录（只读挂载到容器 `/data/source`） | `./resin-data/cache` |
+| `APP_DB_HOST_DIR` | 宿主机应用库目录（挂载到容器 `/data/app`） | `./app-data` |
+| `MMDB_HOST_DIR` | 宿主机离线库目录（挂载到容器 `/data/mmdb`） | `./mmdb-data` |
+| `SOURCE_DB_PATH` | Resin `cache.db` 的**容器内**路径（只读） | `/data/source/cache.db` |
+| `APP_DB_PATH` | 应用 SQLite 的**容器内**路径 | `/data/app/nodes.sqlite` |
 | `SOURCE_INCLUDE_TYPES` | 抽取的节点类型：`all`/`*`/空=全部；或逗号分隔白名单（如 `http,vless,trojan`） | `all` |
 | `SOURCE_REQUIRE_HEALTHY` | 入库前要求 Resin 原生健康（未熔断 + 有出口 IP + 有延迟样本） | `true` |
 | `SOURCE_MAX_LATENCY_MS` | 入库延迟上限（毫秒），`<=0` 关闭延迟门槛 | `300` |
@@ -384,7 +393,10 @@ curl -s "localhost:8000/nodes?limit=1"
     ```
     （或临时设 `ENRICH_CACHE_TTL=0`）随后 `POST /refresh`，再 `POST /pool/rebuild?force=true`。
 - `by_state.probing` 偏多 → AbuseIPDB 查询失败，检查 `ABUSEIPDB_API_KEY`（日志会有风险查询告警）。
-- `nodes=0` 或 `/health` 中 `source_db.reachable=false` → 数据源路径/挂载不对，检查 `SOURCE_DB_PATH` 与 `./resin-data/cache` 挂载。
+- `nodes=0` 或 `/health` 中 `source_db.reachable=false` → 数据源路径/挂载不对，检查 `SOURCE_DB_PATH` 与 `${RESIN_CACHE_HOST_DIR}` 挂载。
+  若报 `无法读取数据源 .../cache.db: unable to open database file`，多半是 **`SOURCE_DB_PATH` 填成了宿主机路径**（如 `/root/Resin/data/cache/cache.db`）。
+  正确做法：`.env` 里 `SOURCE_DB_PATH=/data/source/cache.db`（容器路径），并用 `RESIN_CACHE_HOST_DIR=/root/Resin/data/cache` 指向宿主机目录，然后 `docker compose up -d --force-recreate`。
+  也可直接确认容器内文件是否存在：`docker compose exec node-enricher ls -l /data/source/cache.db`。
 
 ### 改了 `.env` 不生效
 `docker compose restart` 不重读 `.env`，需要**重建容器**：
