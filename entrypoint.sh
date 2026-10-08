@@ -16,7 +16,7 @@ chown -R app:app /data/mmdb
 mkdir -p /data/source
 
 # 离线库（Merged-IP.mmdb）初始下载：仅在开启自动下载时执行；失败不阻断启动
-if [ "${MERGED_IP_AUTO_DOWNLOAD:-false}" = "true" ]; then
+if [ "${MERGED_IP_AUTO_DOWNLOAD:-true}" = "true" ]; then
     echo "[entrypoint] 检查离线库: ${MERGED_IP_DB_PATH:-/data/mmdb/Merged-IP.mmdb}"
     if ! gosu app python /app/scripts/fetch_mmdb.py; then
         echo "[entrypoint][warn] 离线库下载失败，服务将继续启动（mergedip 将不可用）"

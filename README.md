@@ -110,7 +110,7 @@ docker compose up -d          # 该目录只读挂载到容器 /data/source，�
 
 首次启动会**自动完成**（失败仅告警、不阻断启动）：
 - **导入内置 ASN 名单**（约 70 云 + 110 住宅 ISP，幂等 upsert；由 `ASN_SEED_ON_START` 控制，默认开启）；
-- 当 `MERGED_IP_AUTO_DOWNLOAD=true` 时**下载离线库** `Merged-IP.mmdb` 到 `./mmdb-data`（见 3.3）。
+- 默认（`MERGED_IP_AUTO_DOWNLOAD=true`）**下载离线库** `Merged-IP.mmdb` 到 `./mmdb-data`（见 3.3；设为 `false` 可关闭）。
 
 `docker-compose.yml` 已配置：
 - `${RESIN_CACHE_HOST_DIR:-./resin-data/cache}` → `/data/source` **只读 (`ro`)** 挂载（文件系统级防误写，AC-1）
@@ -127,16 +127,16 @@ docker compose up -d          # 该目录只读挂载到容器 /data/source，�
 
 为避免把 92MB 数据烤进镜像，Docker 场景使用**独立可写卷 `/data/mmdb`**，并支持自动下载/更新：
 
-**方式 A：自动下载（推荐，Docker）**
+**方式 A：自动下载（默认，推荐 Docker）**
 
-在 `.env` 中：
+`.env` 默认即为：
 ```bash
-MERGED_IP_AUTO_DOWNLOAD=true       # 启动时由 entrypoint 自动下载到 /data/mmdb
+MERGED_IP_AUTO_DOWNLOAD=true       # 默认开启；启动时由 entrypoint 自动下载到 /data/mmdb
 MERGED_IP_DOWNLOAD_INTERVAL=86400  # 运行期每天刷新一次（0=仅启动检查）
 ```
 
 > `ENRICHERS` 默认即为 `mergedip,ipinfo`（优先离线库，未命中再回退在线 ipinfo），通常无需显式设置；
-> 启用离线库的关键是打开 `MERGED_IP_AUTO_DOWNLOAD`。
+> `MERGED_IP_AUTO_DOWNLOAD` 默认 `true`，如需完全离线/自行放置库，设为 `false` 并配 `MERGED_IP_DB_PATH`。
 
 然后 `docker compose up -d`。首次启动会下载离线库到 `./mmdb-data/Merged-IP.mmdb`；
 后续每 `MERGED_IP_DOWNLOAD_INTERVAL` 秒强制拉取最新库，enricher 按文件 mtime **热重载**，无需重启。
@@ -175,7 +175,7 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | `SOURCE_MAX_LATENCY_MS` | 入库延迟上限（毫秒），`<=0` 关闭延迟门槛 | `300` |
 | `ENRICHERS` | 启用的富化器（按顺序回退，逗号分隔），可选 `ipinfo` / `mergedip` | `mergedip,ipinfo` |
 | `MERGED_IP_DB_PATH` | 离线 ASN 库路径（NetworkCats/Merged-IP-Data 的 `Merged-IP.mmdb`） | `/data/source/Merged-IP.mmdb`（compose 覆盖为 `/data/mmdb/Merged-IP.mmdb`） |
-| `MERGED_IP_AUTO_DOWNLOAD` | 启动时自动下载离线库（entrypoint 执行） | `false` |
+| `MERGED_IP_AUTO_DOWNLOAD` | 启动时自动下载离线库（entrypoint 执行） | `true` |
 | `MERGED_IP_DOWNLOAD_URL` | 离线库下载地址（可换镜像/代理） | GitHub Release latest |
 | `MERGED_IP_DOWNLOAD_FORCE` | 强制重新下载（忽略已存在文件） | `false` |
 | `MERGED_IP_DOWNLOAD_TIMEOUT` | 单次下载超时（秒） | `300` |

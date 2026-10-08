@@ -57,7 +57,7 @@ class Settings:
         self.mergedip_db_path: str = os.getenv("MERGED_IP_DB_PATH", "/data/source/Merged-IP.mmdb")
         # 离线库自动下载/更新（默认关闭；启用 mergedip 时建议开启）
         self.merged_ip_auto_download: bool = _get_bool(
-            os.getenv("MERGED_IP_AUTO_DOWNLOAD", "false"), False
+            os.getenv("MERGED_IP_AUTO_DOWNLOAD", "true"), True
         )
         self.merged_ip_download_url: str = os.getenv(
             "MERGED_IP_DOWNLOAD_URL",
