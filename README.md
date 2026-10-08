@@ -308,23 +308,48 @@ Resin ：远程订阅 URL 指到该端点 → 定时拉取 → 去重合并 → 
 
 ```bash
 RESIN_FEED_ENABLED=true
-RESIN_FEED_TOKEN=生成一个长随机串
+RESIN_FEED_TOKEN=生成一个长随机串     # 公网必填；留空=不鉴权（仅内网）
 RESIN_FEED_STATES=in_pool
 ```
 
-启动后端点：`https://<你的域名>/resin/subscription?token=<RESIN_FEED_TOKEN>`。
+启动后端点：`http://<分类器IP>:8000/resin/subscription?token=<RESIN_FEED_TOKEN>`。
 `docker-compose.yml` 已映射 `8000:8000`；公网建议前置 HTTPS 反代（Caddy/Nginx）。
 
-**步骤二：Resin 一次性配置**（WebUI，无需改代码）
+**要填进 Resin 的订阅 URL 示例**
 
-1. **Subscriptions** → 新增远程订阅：URL 填上面的端点，`update_interval` 建议 `5m`。
-2. **Platforms** → 新建 Platform：`RegexFilters` 填 MUST 规则 `*<订阅名>`（如需限定地区再加
+| 场景 | 填进 Resin 的 URL |
+| --- | --- |
+| 有 token（推荐，公网/跨机） | `http://192.168.1.10:8000/resin/subscription?token=2f8c9d1e...e91` |
+| 有 token + HTTPS 反代 | `https://classifier.example.com/resin/subscription?token=2f8c9d1e...e91` |
+| 无 token（仅内网，`.env` 留空 `RESIN_FEED_TOKEN`） | `http://192.168.1.10:8000/resin/subscription` |
+
+> token 只能走 query（Resin 拉取时不发送自定义请求头），即 `?token=<RESIN_FEED_TOKEN>`。
+> Resin 与本服务同机时也可用 `http://127.0.0.1:8000/resin/subscription?token=...`。
+> **无 token 时任何能访问该端口的人都能拉到节点凭据**，仅限内网使用。
+
+**步骤二：在 Resin WebUI 填一次**（无需改代码）
+
+1. **Subscriptions** → 新增远程订阅：
+   - `Name`：`resin-residential-pool`（与 `.env` 的 `RESIN_FEED_SUBSCRIPTION_NAME` 一致便于识别）
+   - `URL`：上表选一条（含 `?token=...` 或用无 token 版）
+   - `UpdateInterval`：`5m`
+2. **Platforms** → 新建 Platform：`RegexFilters` 填 MUST 规则 `*resin-residential-pool`（如需限定地区再加
    `RegionFilters`）。
 3. 客户端改用该 Platform 接入，例如：
    `curl -x http://resin:2260 -U "<PlatformName>.<account>:<PROXY_TOKEN>" https://api.ipify.org`。
 
-**上线前 dry-run 校验（强烈建议）**：先用 `GET /export/resin-subscription?token=...` 拿到内容，
-再调 Resin 的 `POST /api/v1/platforms/preview-filter`（或 `GET /api/v1/nodes`）核对命中节点数，
+**上线前 dry-run 校验（强烈建议）**
+
+```bash
+# 有 token：先看订阅内容（与 Resin 拉到的完全一致）
+curl "http://192.168.1.10:8000/export/resin-subscription?token=2f8c9d1e...e91"
+# 无 token（仅内网）
+curl "http://192.168.1.10:8000/export/resin-subscription"
+# 只看数量/内容哈希，不返回节点内容
+curl "http://192.168.1.10:8000/resin/status?token=2f8c9d1e...e91"
+```
+
+拿到内容后，再调 Resin 的 `POST /api/v1/platforms/preview-filter`（或 `GET /api/v1/nodes`）核对命中节点数，
 确认无重复节点后再让订阅生效。
 
 **安全须知**：节点 `raw_options` 可能包含代理凭据（http 的 `username/password`、vmess/vless 的 `uuid`、trojan/shadowsocks/hysteria2 的 `password` 等），订阅内容属敏感数据。
