@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>代理节点住宅/机房识别 · 数据看板</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>代理节点住宅/机房识别</h1>
+      <span class="version" id="version">-</span>
+    </div>
+    <nav class="nav">
+      <a class="active" href="./index.html">节点总览</a>
+      <a href="./pool.html">节点池</a>
+      <a href="./asn.html">ASN 管理</a>
+    </nav>
+    <div class="topbar-actions">
+      <span class="badge" id="health-badge">连接中…</span>
+      <button id="refresh-stats" class="btn">刷新数据</button>
+      <select id="export-format" class="fmt-select">
+        <option value="csv">CSV</option>
+        <option value="json">JSON</option>
+      </select>
+      <button id="export-data" class="btn">导出</button>
+      <input id="refresh-token" class="token-input" type="password" placeholder="REFRESH_TOKEN(可选)" />
+      <button id="trigger-refresh" class="btn primary">触发同步</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="ingest-progress" class="progress-box" hidden></section>
+    <section class="cards" id="stats-cards"></section>
+
+    <section class="panel">
+      <div class="filters">
+        <label>协议
+          <select id="f-protocol">
+            <option value="">全部</option>
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </select>
+        </label>
+        <label>住宅属性
+          <select id="f-residential">
+            <option value="">全部</option>
+            <option value="residential">住宅</option>
+            <option value="datacenter">机房</option>
+            <option value="residential_proxy">住宅代理</option>
+            <option value="unknown">未知</option>
+          </select>
+        </label>
+        <label>AS 类型
+          <select id="f-as_type">
+            <option value="">全部</option>
+            <option value="hosting">hosting</option>
+            <option value="isp">isp</option>
+            <option value="business">business</option>
+          </select>
+        </label>
+        <label>国家
+          <input id="f-country" type="text" placeholder="如 US / JP" maxlength="2" />
+        </label>
+        <label>富化
+          <select id="f-enriched">
+            <option value="">全部</option>
+            <option value="true">已富化</option>
+            <option value="false">未富化</option>
+          </select>
+        </label>
+        <label>最大延迟(ms)
+          <input id="f-max-latency" type="number" min="0" placeholder="如 200" />
+        </label>
+        <label>每页
+          <select id="f-limit">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <button id="apply-filters" class="btn primary">查询</button>
+        <button id="reset-filters" class="btn">重置</button>
+      </div>
+
+      <div class="table-meta">
+        <span id="table-count">-</span>
+        <span id="last-sync">-</span>
+      </div>
+
+      <div class="table-wrap">
+        <table id="nodes-table">
+          <thead>
+            <tr>
+              <th data-sort="ip">IP:Port</th>
+              <th data-sort="protocol">协议</th>
+              <th>Tag</th>
+              <th data-sort="is_residential">住宅属性</th>
+              <th data-sort="as_type">AS 类型</th>
+              <th>ASN</th>
+              <th>AS 名称</th>
+              <th data-sort="country_code">国家/城市</th>
+              <th data-sort="latency_ms">延迟</th>
+              <th>出口</th>
+              <th data-sort="last_enriched_at">富化时间</th>
+            </tr>
+          </thead>
+          <tbody id="nodes-body"></tbody>
+        </table>
+      </div>
+
+      <div class="pager">
+        <button id="prev-page" class="btn">上一页</button>
+        <span id="page-info">-</span>
+        <button id="next-page" class="btn">下一页</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">节点详情</h2>
+        <button id="modal-close" class="btn">关闭</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="./progress.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

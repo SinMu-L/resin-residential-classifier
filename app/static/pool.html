@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>高质量节点池 · 数据看板</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>高质量节点池</h1>
+      <span class="version" id="version">-</span>
+    </div>
+    <nav class="nav">
+      <a href="./index.html">节点总览</a>
+      <a class="active" href="./pool.html">节点池</a>
+      <a href="./asn.html">ASN 管理</a>
+    </nav>
+    <div class="topbar-actions">
+      <input id="refresh-token" class="token-input" type="password" placeholder="REFRESH_TOKEN(写操作)" />
+      <select id="export-format" class="fmt-select">
+        <option value="csv">CSV</option>
+        <option value="json">JSON</option>
+      </select>
+      <button id="export-data" class="btn">导出</button>
+      <button id="rebuild-pool" class="btn">重建池</button>
+      <button id="force-rebuild" class="btn primary">强制重检</button>
+      <button id="reload" class="btn">刷新</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="pool-progress" class="progress-box" hidden></section>
+    <section class="cards" id="pool-cards"></section>
+
+    <section class="panel">
+      <div class="filters">
+        <label>状态
+          <select id="f-state">
+            <option value="">全部</option>
+            <option value="in_pool">in_pool</option>
+            <option value="probation">probation</option>
+            <option value="probing">probing</option>
+            <option value="evicted">evicted</option>
+          </select>
+        </label>
+        <label>协议
+          <select id="f-protocol">
+            <option value="">全部</option>
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </select>
+        </label>
+        <label>最大风险分
+          <input id="f-max-abuse" type="number" min="0" max="100" placeholder="如 30" />
+        </label>
+        <label>最小纯净分
+          <input id="f-min-pool" type="number" min="0" max="100" placeholder="如 70" />
+        </label>
+        <label>最大延迟(ms)
+          <input id="f-max-latency" type="number" min="0" placeholder="如 200" />
+        </label>
+        <label>IP / ASN
+          <input id="f-q" type="text" placeholder="如 1.2.3.4 / AS123" />
+        </label>
+        <label>每页
+          <select id="f-limit">
+            <option value="20">20</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <button id="apply-filters" class="btn primary">查询</button>
+        <button id="reset-filters" class="btn">重置</button>
+      </div>
+
+      <div class="table-meta">
+        <span id="table-count">-</span>
+        <span id="pool-top">-</span>
+      </div>
+
+      <div class="table-wrap">
+        <table id="pool-table">
+          <thead>
+            <tr>
+              <th data-sort="ip">IP:Port</th>
+              <th data-sort="state">状态</th>
+              <th data-sort="asn">ASN</th>
+              <th data-sort="abuse_score">风险分</th>
+              <th data-sort="pool_score">纯净分</th>
+              <th data-sort="latency_ms">延迟</th>
+              <th>出口</th>
+              <th>连续失败</th>
+              <th data-sort="admitted_at">入池时间</th>
+              <th data-sort="last_checked_at">最近检测</th>
+              <th>淘汰原因</th>
+            </tr>
+          </thead>
+          <tbody id="pool-body"></tbody>
+        </table>
+      </div>
+
+      <div class="pager">
+        <button id="prev-page" class="btn">上一页</button>
+        <span id="page-info">-</span>
+        <button id="next-page" class="btn">下一页</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="modal-backdrop" id="modal" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="modal-title">池节点详情</h2>
+        <button id="modal-close" class="btn">关闭</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="./common.js"></script>
+  <script src="./progress.js"></script>
+  <script src="./pool.js"></script>
+</body>
+</html>

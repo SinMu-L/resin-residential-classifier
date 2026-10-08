@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ASN 名单管理 · 数据看板</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>ASN 名单管理</h1>
+      <span class="version" id="version">-</span>
+    </div>
+    <nav class="nav">
+      <a href="./index.html">节点总览</a>
+      <a href="./pool.html">节点池</a>
+      <a class="active" href="./asn.html">ASN 管理</a>
+    </nav>
+    <div class="topbar-actions">
+      <span class="badge" id="asn-counts">-</span>
+      <input id="refresh-token" class="token-input" type="password" placeholder="REFRESH_TOKEN(写操作)" />
+      <select id="export-format" class="fmt-select">
+        <option value="csv">CSV</option>
+        <option value="json">JSON</option>
+      </select>
+      <button id="export-data" class="btn">导出</button>
+      <button id="reload" class="btn">刷新</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="panel add-panel">
+      <h3 class="section" style="margin-top:0">新增 / 覆盖一条 ASN</h3>
+      <div class="filters">
+        <label>ASN<input id="a-asn" type="text" placeholder="如 AS16509" /></label>
+        <label>类别
+          <select id="a-category">
+            <option value="cloud">cloud（机房/云）</option>
+            <option value="residential">residential（住宅 ISP）</option>
+          </select>
+        </label>
+        <label>机构<input id="a-org" type="text" placeholder="如 Amazon AWS" /></label>
+        <label>国家<input id="a-country" type="text" placeholder="如 US" maxlength="2" /></label>
+        <label>备注<input id="a-note" type="text" placeholder="可选" /></label>
+        <label>启用
+          <select id="a-enabled"><option value="1">是</option><option value="0">否</option></select>
+        </label>
+        <button id="add-asn" class="btn primary">保存</button>
+      </div>
+      <h3 class="section">批量导入（每行：ASN 或 "ASN,机构"）</h3>
+      <div class="filters" style="align-items:flex-start">
+        <label>类别
+          <select id="i-category">
+            <option value="cloud">cloud（机房/云）</option>
+            <option value="residential">residential（住宅 ISP）</option>
+          </select>
+        </label>
+        <textarea id="i-text" rows="4" cols="60" placeholder="AS16509,Amazon AWS&#10;AS15169 Google"></textarea>
+        <button id="import-asn" class="btn">导入</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="filters">
+        <label>类别
+          <select id="f-category">
+            <option value="">全部</option>
+            <option value="cloud">cloud</option>
+            <option value="residential">residential</option>
+          </select>
+        </label>
+        <label>启用
+          <select id="f-enabled">
+            <option value="">全部</option>
+            <option value="true">启用</option>
+            <option value="false">禁用</option>
+          </select>
+        </label>
+        <label>搜索
+          <input id="f-q" type="text" placeholder="ASN / 机构" />
+        </label>
+        <label>每页
+          <select id="f-limit">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="500">500</option>
+          </select>
+        </label>
+        <button id="apply-filters" class="btn primary">查询</button>
+        <button id="reset-filters" class="btn">重置</button>
+      </div>
+
+      <div class="table-meta"><span id="table-count">-</span></div>
+
+      <div class="table-wrap">
+        <table id="asn-table">
+          <thead>
+            <tr>
+              <th data-sort="asn">ASN</th>
+              <th data-sort="category">类别</th>
+              <th data-sort="org">机构</th>
+              <th data-sort="country">国家</th>
+              <th>启用</th>
+              <th>来源</th>
+              <th data-sort="updated_at">更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="asn-body"></tbody>
+        </table>
+      </div>
+
+      <div class="pager">
+        <button id="prev-page" class="btn">上一页</button>
+        <span id="page-info">-</span>
+        <button id="next-page" class="btn">下一页</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="./common.js"></script>
+  <script src="./asn.js"></script>
+</body>
+</html>
