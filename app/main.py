@@ -29,6 +29,13 @@ async def lifespan(app: FastAPI):
             "公网暴露时将无鉴权，请设置 token 或仅限内网访问"
         )
 
+    # 1c) L2 风险查询依赖 AbuseIPDB Key；缺失时池会大量停在 probing，明确告警
+    if settings.pool_enabled and not settings.abuseipdb_api_key:
+        logger.warning(
+            "未设置 ABUSEIPDB_API_KEY：节点池 L2 风险查询将全部失败并停在 probing 状态；"
+            "请配置该 Key（必填），或将 POOL_ENABLED 设为 false 仅用 L1"
+        )
+
     # 2) 启动定时同步调度
     scheduler = asyncio.create_task(_scheduler()) if settings.ingest_interval > 0 else None
 

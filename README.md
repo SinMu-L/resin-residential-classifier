@@ -98,9 +98,12 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 # 准备真实 Resin 数据目录，例如 /root/Resin/data/cache/cache.db
-cp .env.example .env          # 按需填入 IPINFO_TOKEN / ABUSEIPDB_API_KEY
-# 若 Resin 数据不在项目内 ./resin-data/cache，请在 .env 指定宿主机目录：
-#   RESIN_CACHE_HOST_DIR=/root/Resin/data/cache
+cp .env.example .env
+# 必填项：
+#   RESIN_CACHE_HOST_DIR=/root/Resin/data/cache   # 宿主机 Resin cache 目录
+#   APP_DB_HOST_DIR=./app-data                     # 宿主机应用库目录
+#   MMDB_HOST_DIR=./mmdb-data                      # 宿主机离线库目录
+#   ABUSEIPDB_API_KEY=<你的 key>                   # L2 风险查询，必填
 docker compose up -d          # 该目录只读挂载到容器 /data/source，应用库持久化到 ./app-data
 ```
 
@@ -165,9 +168,9 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 
 | 配置 | 说明 | 默认 |
 | --- | --- | --- |
-| `RESIN_CACHE_HOST_DIR` | 宿主机 Resin cache 目录（只读挂载到容器 `/data/source`） | `./resin-data/cache` |
-| `APP_DB_HOST_DIR` | 宿主机应用库目录（挂载到容器 `/data/app`） | `./app-data` |
-| `MMDB_HOST_DIR` | 宿主机离线库目录（挂载到容器 `/data/mmdb`） | `./mmdb-data` |
+| `RESIN_CACHE_HOST_DIR` | 【Docker 必填】宿主机 Resin cache 目录（只读挂载到容器 `/data/source`） | `./resin-data/cache` |
+| `APP_DB_HOST_DIR` | 【Docker 必填】宿主机应用库目录（挂载到容器 `/data/app`） | `./app-data` |
+| `MMDB_HOST_DIR` | 【Docker 必填】宿主机离线库目录（挂载到容器 `/data/mmdb`） | `./mmdb-data` |
 | `SOURCE_DB_PATH` | Resin `cache.db` 的**容器内**路径（只读） | `/data/source/cache.db` |
 | `APP_DB_PATH` | 应用 SQLite 的**容器内**路径 | `/data/app/nodes.sqlite` |
 | `SOURCE_INCLUDE_TYPES` | 抽取的节点类型：`all`/`*`/空=全部；或逗号分隔白名单（如 `http,vless,trojan`） | `all` |
@@ -192,7 +195,7 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | `POOL_ENABLED` | 启用节点池定时调度 | `true` |
 | `POOL_INTERVAL` | 池复检周期（秒），0=关闭定时 | `86400` |
 | `POOL_L1_STRICT` | L1：未知 ASN 是否直接拒绝（`is_hosting` 命中总是拒绝） | `true` |
-| `ABUSEIPDB_API_KEY` | AbuseIPDB API Key（L2） | 空 |
+| `ABUSEIPDB_API_KEY` | 【必填】AbuseIPDB API Key（L2 风险查询；缺失则全部停在 probing） | 空 |
 | `ABUSEIPDB_BASE_URL` | AbuseIPDB API 基址 | `https://api.abuseipdb.com/api/v2` |
 | `ABUSEIPDB_TIMEOUT` / `ABUSEIPDB_CONCURRENCY` | 风险查询单次超时（秒）/ 并发数 | `8` / `8` |
 | `POOL_ABUSE_MAX_SCORE` | L2 放行阈值（`abuseConfidenceScore <` 该值） | `30` |
