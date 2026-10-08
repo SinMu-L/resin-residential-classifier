@@ -1,6 +1,6 @@
 # 代理节点住宅/机房识别服务
 
-基于 [Resinat/Resin](https://github.com/Resinat/Resin) 单独拆出的 **只读旁路分析组件**。它从 Resin 运行目录的 `cache.db` 中**只读抽取 http/https 代理节点**，调用 [ipinfo.io](https://ipinfo.io) 做 IP 情报富化（**全量字段落库**），并派生住宅（residential）/ 机房（datacenter）等属性，最终通过 REST API 按 `ip:port` 对外提供查询。
+基于 [Resinat/Resin](https://github.com/Resinat/Resin) 单独拆出的 **只读旁路分析组件**。它从 Resin 运行目录的 `cache.db` 中**只读抽取 http/https 代理节点**，通过可插拔富化链做 IP 情报富化（默认 `mergedip,ipinfo`：离线 [Merged-IP.mmdb](https://github.com/NetworkCats/Merged-IP-Data) 优先，未命中回退在线 [ipinfo.io](https://ipinfo.io)，**全量字段落库**），并派生住宅（residential）/ 机房（datacenter）等属性，最终通过 REST API 按 `ip:port` 对外提供查询。
 
 > 定位：零侵入、只读、可独立部署。不修改、不回写 Resin 的任何数据（AC-1）。
 
@@ -54,6 +54,7 @@ Python 3.11 · FastAPI · SQLite · Docker / Docker Compose
 │   └── smoke_test.py      # 离线冒烟测试（Mock 富化器，验证关键验收点）
 ├── Dockerfile
 ├── docker-compose.yml
+├── entrypoint.sh          # 容器入口：权限修正 + 自动导入 ASN 名单 + 可选下载离线库
 ├── requirements.txt
 ├── .env.example
 └── README.md
@@ -78,6 +79,9 @@ cp .env.example .env          # 按需填入 IPINFO_TOKEN，并改为本地路�
 #   APP_DB_PATH=./app-data/nodes.sqlite
 #   INGEST_INTERVAL=0
 #   IPINFO_TOKEN=你的token
+#   # 或改用离线库（无需 token）：
+#   MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb
+#   #   （先下载：python scripts/fetch_mmdb.py --out ./resin-data/cache/Merged-IP.mmdb）
 
 # 4) 启动服务
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -94,15 +98,21 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ```bash
 # 准备真实 Resin 数据目录，例如 ./resin-data/cache/cache.db
-cp .env.example .env          # 填入 IPINFO_TOKEN
+cp .env.example .env          # 按需填入 IPINFO_TOKEN / ABUSEIPDB_API_KEY
 docker compose up -d          # 只读挂载数据源，应用库持久化到 ./app-data
 ```
+
+首次启动会**自动完成**（失败仅告警、不阻断启动）：
+- **导入内置 ASN 名单**（约 70 云 + 110 住宅 ISP，幂等 upsert；由 `ASN_SEED_ON_START` 控制，默认开启）；
+- 当 `MERGED_IP_AUTO_DOWNLOAD=true` 时**下载离线库** `Merged-IP.mmdb` 到 `./mmdb-data`（见 3.3）。
 
 `docker-compose.yml` 已配置：
 - `./resin-data/cache` → `/data/source` **只读 (`ro`)** 挂载（文件系统级防误写，AC-1）
 - `./app-data` → `/data/app` 读写持久化
 - `./mmdb-data` → `/data/mmdb` 读写持久化（离线库 `Merged-IP.mmdb`，见 3.3）
 - `healthcheck` 调用 `/health`
+- `env_file: .env` 注入全部配置；`environment:` 仅用 `${VAR:-默认}` 兜底三个路径，
+  **以 `.env` 为准**（Compose 中 `environment:` 优先级高于 `env_file`，这里用插值避免覆盖）
 
 ### 3.3 离线 ASN 库（Merged-IP.mmdb）
 
@@ -115,10 +125,13 @@ docker compose up -d          # 只读挂载数据源，应用库持久化到 ./
 
 在 `.env` 中：
 ```bash
-ENRICHERS=mergedip,ipinfo          # 优先离线库；未命中再回退在线 ipinfo
 MERGED_IP_AUTO_DOWNLOAD=true       # 启动时由 entrypoint 自动下载到 /data/mmdb
 MERGED_IP_DOWNLOAD_INTERVAL=86400  # 运行期每天刷新一次（0=仅启动检查）
 ```
+
+> `ENRICHERS` 默认即为 `mergedip,ipinfo`（优先离线库，未命中再回退在线 ipinfo），通常无需显式设置；
+> 启用离线库的关键是打开 `MERGED_IP_AUTO_DOWNLOAD`。
+
 然后 `docker compose up -d`。首次启动会下载离线库到 `./mmdb-data/Merged-IP.mmdb`；
 后续每 `MERGED_IP_DOWNLOAD_INTERVAL` 秒强制拉取最新库，enricher 按文件 mtime **热重载**，无需重启。
 `MERGED_IP_DOWNLOAD_URL` 可改为镜像/代理地址以适配受限网络。
@@ -155,6 +168,7 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
 | `MERGED_IP_DOWNLOAD_FORCE` | 强制重新下载（忽略已存在文件） | `false` |
 | `MERGED_IP_DOWNLOAD_TIMEOUT` | 单次下载超时（秒） | `300` |
 | `MERGED_IP_DOWNLOAD_INTERVAL` | 运行期刷新间隔（秒），0=仅启动检查一次 | `0` |
+| `ASN_SEED_ON_START` | 容器启动时自动导入内置 ASN 名单（幂等，见 6.1） | `true` |
 | `ENRICH_CACHE_TTL` | IP 富化缓存有效期（秒） | `86400` |
 | `IPINFO_TOKEN` | ipinfo.io API Token（启用 ipinfo 时必填） | 空 |
 | `IPINFO_BASE_URL` | ipinfo API 基址 | `https://api.ipinfo.io` |
@@ -243,12 +257,15 @@ MERGED_IP_DB_PATH=./resin-data/cache/Merged-IP.mmdb   # Docker 内默认 /data/m
   次超标才淘汰）与冷却期 `POOL_COOLDOWN`；定时（`POOL_INTERVAL`）在整轮漏斗中按各状态 `next_check_at` 复检。
 - **L3 场景实测（暂未实现，已预留）**：`pool_score` 与状态位可承载后续 Netflix/ChatGPT/YouTube 解锁检测。
 
-名单初始化（精选首发集：约 70 条云 ASN + 约 110 条住宅 ISP ASN）：
+名单初始化（精选首发集：约 70 条云 ASN + 约 110 条住宅 ISP ASN，**幂等 upsert**）：
+
+- **Docker 部署（推荐）**：容器**启动时自动导入**（`entrypoint.sh` 调用 `scripts/seed_asn_registry.py`，
+  由 `ASN_SEED_ON_START` 控制，默认 `true`），无需手动执行。
+- **本地开发**：手动执行：
 
 ```bash
-PYTHONPATH=. python scripts/seed_asn_registry.py          # 用 .env 的 APP_DB_PATH
-# 或显式指定应用库路径：
-PYTHONPATH=. python scripts/seed_asn_registry.py ./app-data/nodes.sqlite
+python scripts/seed_asn_registry.py                          # 用 .env 的 APP_DB_PATH
+python scripts/seed_asn_registry.py ./app-data/nodes.sqlite  # 或显式指定应用库路径
 ```
 
 看板新增两个页面：`/ui/pool.html`（节点池）与 `/ui/asn.html`（ASN 管理，写操作需 `REFRESH_TOKEN`）。
@@ -333,7 +350,57 @@ PYTHONPATH=. python tests/smoke_test.py
 
 ---
 
-## 9. 验收对照（PRD 第 11 节）
+## 9. 常见问题排查（Troubleshooting）
+
+### 日志在哪里
+服务日志全部输出到容器 stdout，无日志文件：
+```bash
+docker compose logs -f --tail=200     # 实时
+docker compose logs --since=10m       # 最近 10 分钟
+```
+关注两类行：
+- 启动：`[entrypoint] 导入/补齐 ASN 名单...` / `已写入/更新 ASN 名单: 174 条 (cloud=71, residential=103)`
+- 漏斗：`池漏斗完成: ips=.. 查询=.. in_pool+=.. 淘汰=.. L1拒=..（云=../未知=..）`
+
+### `/ui/pool.html` 一直为空（池内 0 条）
+先查聚合接口：
+```bash
+curl -s localhost:8000/pool/stats
+curl -s "localhost:8000/nodes?limit=1"
+```
+按现象定位：
+- `asn_registry.cloud/residential` 均为 0 → **名单未导入**：确认 `ASN_SEED_ON_START=true`，启动日志应能搜到“已写入/更新 ASN 名单”。
+- `run.message` 中 `L1拒（未知）` 占绝大多数 → 节点 `asn` 为空，多为**富化失败**：
+  - 看 `GET /nodes?limit=1` 的 `enrichment.asn` 与 `enrichment.raw`；
+  - 若 `raw` 形如 `{"error":"Token does not have access to this API."}` → 当前 ipinfo token 无 `/batch`、`/lookup` 权限。
+    改用离线库（无需 token）：`.env` 设 `ENRICHERS=mergedip,ipinfo` + `MERGED_IP_AUTO_DOWNLOAD=true`。
+    ⚠️ 失败的富化结果会被缓存（`ENRICH_CACHE_TTL` 默认 24h），**必须先清缓存再同步**，否则一直复用旧结果：
+    ```bash
+    docker compose exec node-enricher python -c "from app import db; c=db.get_app_conn(); c.execute('DELETE FROM ip_enrichments'); c.commit(); print('cleared')"
+    ```
+    （或临时设 `ENRICH_CACHE_TTL=0`）随后 `POST /refresh`，再 `POST /pool/rebuild?force=true`。
+- `by_state.probing` 偏多 → AbuseIPDB 查询失败，检查 `ABUSEIPDB_API_KEY`（日志会有风险查询告警）。
+- `nodes=0` 或 `/health` 中 `source_db.reachable=false` → 数据源路径/挂载不对，检查 `SOURCE_DB_PATH` 与 `./resin-data/cache` 挂载。
+
+### 改了 `.env` 不生效
+`docker compose restart` 不重读 `.env`，需要**重建容器**：
+```bash
+docker compose up -d --force-recreate
+```
+只有改了代码 / `Dockerfile` / `requirements.txt` 才需要 `--build`。
+
+### 服务器上已有实例如何更新
+```bash
+cd /path/to/resin-residential-classifier
+git pull origin master
+docker compose up -d --build            # 代码变了
+# 仅 .env / docker-compose.yml 变了：docker compose up -d --force-recreate
+```
+数据都在 bind mount（`./app-data`、`./mmdb-data`），重建容器不会丢数据。
+
+---
+
+## 10. 验收对照（PRD 第 11 节）
 
 | 验收项 | 状态 |
 | --- | --- |
